@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Blue Survival Final Edition</title>
+<style>
+html,body{
+margin:0;
+padding:0;
+overflow:hidden;
+background:white;
+font-family:Arial;
+}
+
+canvas{display:none;}
+
+.screen{
+position:absolute;
+width:100%;
+height:100%;
+display:flex;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+text-align:center;
+}
+
+button{
+padding:14px 35px;
+font-size:20px;
+margin:10px;
+border:none;
+border-radius:12px;
+cursor:pointer;
+background:#111;
+color:white;
+transition:0.3s;
+}
+
+button:hover{
+background:#444;
+transform:scale(1.05);
+}
+
+h1{font-size:60px;margin-bottom:30px;}
+
+</style>
+</head>
+<body>
+
+<!-- MENU -->
+<div id="menu" class="screen">
+<h1>Blue Survival</h1>
+<button onclick="startGame()">Play</button>
+<button onclick="showTop()">Top 10</button>
+</div>
+
+<!-- TOP -->
+<div id="topScreen" class="screen" style="display:none;">
+<h2>🏆 Top 10</h2>
+<div id="topList"></div>
+<button onclick="backMenu()">Back</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+function resize(){
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+}
+resize();
+window.addEventListener("resize",resize);
+
+let state="menu";
+let score=0;
+let level=1;
+let gameOver=false;
+
+let record=localStorage.getItem("recordElite")||0;
+let topScores=JSON.parse(localStorage.getItem("top10Elite"))||[];
+
+const player={
+x:0,y:0,
+radius:12,
+baseRadius:12,
+speed:6,
+baseSpeed:6,
+color:"#0099ff",
+shield:false
+};
+
+let balls=[];
+let powers=[];
+let particles=[];
+let lastSpawn=0;
+let lastPower=0;
+let powerActive=false;
+
+/* ===== LEVEL ===== */
+function getLevel(s){
+if(s>=200) return 5;
+if(s>=100) return 4;
+if(s>=50) return 3;
+if(s>=10) return 2;
+return 1;
+}
+
+function difficultyMultiplier(){
+if(level>=5) return 4;
+if(level>=4) return 3;
+if(level>=3) return 2.2;
+if(level>=2) return 1.5;
+return 1;
+}
+
+/* ===== SPAWNS ===== */
+function spawnBalls(){
+let amount=1+Math.floor(level/2);
+for(let i=0;i<amount;i++){
+balls.push({
+x:Math.random()*canvas.width,
+y:-20,
+radius:8+Math.random()*12,
+speed:(2+level*0.6)*difficultyMultiplier()
+});
+}
+}
+
+function spawnPower(){
+if(powerActive) return;
+const types=["green","yellow","orange","purple","black"];
+let type=types[Math.floor(Math.random()*types.length)];
+powers.push({
+x:Math.random()*canvas.width,
+y:-10,
+radius:10,
+type:type,
+speed:2
+});
+}
+
+/* ===== POWER ACTIVATION ===== */
+function activatePower(type){
+
+powerActive=true;
+player.color=type;
+
+if(type==="green") player.speed=player.baseSpeed*2;
+if(type==="yellow"){
+balls.forEach(b=>b.speed*=0.4);
+}
+if(type==="orange"){
+player.radius=player.baseRadius*2;
+}
+if(type==="purple"){
+player.shield=true;
+}
+if(type==="black"){
+balls=[];
+}
+
+/* Shield lasts 5 seconds and does NOT break on first hit */
+setTimeout(()=>{
+player.speed=player.baseSpeed;
+player.radius=player.baseRadius;
+player.shield=false;
+player.color="#0099ff";
+powerActive=false;
+},5000);
+}
+
+/* ===== SAVE TOP 10 ===== */
+function saveScore(){
+
+if(score>record){
+record=score;
+localStorage.setItem("recordElite",record);
+}
+
+topScores.push(score);
+topScores.sort((a,b)=>b-a);
+topScores=topScores.slice(0,10);
+
+localStorage.setItem("top10Elite",JSON.stringify(topScores));
+}
+
+/* ===== RESET ===== */
+function resetGame(){
+saveScore();
+score=0;
+level=1;
+balls=[];
+powers=[];
+particles=[];
+powerActive=false;
+player.speed=player.baseSpeed;
+player.radius=player.baseRadius;
+player.color="#0099ff";
+player.shield=false;
+resetPlayer();
+gameOver=false;
+
+canvas.style.display="none";
+document.getElementById("menu").style.display="flex";
+state="menu";
+}
+
+function resetPlayer(){
+player.x=canvas.width/2;
+player.y=canvas.height-100;
+}
+
+/* ===== CONTROLS ===== */
+const keys={};
+window.addEventListener("keydown",e=>keys[e.key]=true);
+window.addEventListener("keyup",e=>keys[e.key]=false);
+
+/* ===== UPDATE ===== */
+function update(){
+
+if(gameOver){
+setTimeout(resetGame,1500);
+return;
+}
+
+if(keys["ArrowLeft"]) player.x-=player.speed;
+if(keys["ArrowRight"]) player.x+=player.speed;
+if(keys["ArrowUp"]) player.y-=player.speed;
+if(keys["ArrowDown"]) player.y+=player.speed;
+
+player.x=Math.max(player.radius,Math.min(canvas.width-player.radius,player.x));
+player.y=Math.max(player.radius,Math.min(canvas.height-player.radius,player.y));
+
+level=getLevel(score);
+
+/* Trail */
+if(keys["ArrowLeft"]||keys["ArrowRight"]||keys["ArrowUp"]||keys["ArrowDown"]){
+particles.push({
+x:player.x,
+y:player.y,
+radius:4,
+color:player.color,
+life:25,
+vx:(Math.random()-0.5)*4,
+vy:(Math.random()-0.5)*4
+});
+}
+
+/* Particles */
+particles.forEach((p,i)=>{
+p.x+=p.vx;
+p.y+=p.vy;
+p.life--;
+if(p.life<=0) particles.splice(i,1);
+});
+
+/* Balls */
+balls.forEach((b,i)=>{
+b.y+=b.speed;
+
+if(b.y>canvas.height){
+score++;
+balls.splice(i,1);
+}
+
+let dx=player.x-b.x;
+let dy=player.y-b.y;
+if(Math.sqrt(dx*dx+dy*dy)<player.radius+b.radius){
+
+if(player.shield){
+balls.splice(i,1);
+/* Shield does NOT break */
+}else{
+gameOver=true;
+}
+
+}
+});
+
+/* Powers */
+powers.forEach((p,i)=>{
+p.y+=p.speed;
+
+let dx=player.x-p.x;
+let dy=player.y-p.y;
+
+if(Math.sqrt(dx*dx+dy*dy)<player.radius+p.radius){
+activatePower(p.type);
+powers.splice(i,1);
+}
+
+if(p.y>canvas.height) powers.splice(i,1);
+});
+
+/* Spawn */
+let spawnRate=Math.max(300,900-level*80);
+
+if(Date.now()-lastSpawn>spawnRate){
+spawnBalls();
+lastSpawn=Date.now();
+}
+
+if(Date.now()-lastPower>12000){
+spawnPower();
+lastPower=Date.now();
+}
+
+}
+
+/* ===== DRAW ===== */
+function draw(){
+
+ctx.clearRect(0,0,canvas.width,canvas.height);
+
+/* Trail */
+particles.forEach(p=>{
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
+ctx.fillStyle=p.color;
+ctx.globalAlpha=p.life/25;
+ctx.fill();
+ctx.globalAlpha=1;
+});
+
+/* Player */
+ctx.beginPath();
+ctx.arc(player.x,player.y,player.radius,0,Math.PI*2);
+ctx.fillStyle=player.color;
+ctx.shadowColor=player.color;
+ctx.shadowBlur=25;
+ctx.fill();
+ctx.shadowBlur=0;
+
+/* Shield */
+if(player.shield){
+ctx.beginPath();
+ctx.arc(player.x,player.y,player.radius+18,0,Math.PI*2);
+ctx.strokeStyle="cyan";
+ctx.lineWidth=4;
+ctx.stroke();
+}
+
+/* Balls */
+balls.forEach(b=>{
+ctx.beginPath();
+ctx.arc(b.x,b.y,b.radius,0,Math.PI*2);
+ctx.fillStyle="red";
+ctx.fill();
+});
+
+/* Powers */
+powers.forEach(p=>{
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.radius,0,Math.PI*2);
+ctx.fillStyle=p.type;
+ctx.shadowColor=p.type;
+ctx.shadowBlur=30;
+ctx.fill();
+ctx.shadowBlur=0;
+});
+
+ctx.fillStyle="black";
+ctx.font="20px Arial";
+ctx.fillText("Points: "+score,20,30);
+ctx.fillText("Level: "+level,20,60);
+ctx.fillText("Record: "+record,20,90);
+
+}
+
+/* ===== MENU ===== */
+function startGame(){
+document.getElementById("menu").style.display="none";
+canvas.style.display="block";
+state="playing";
+score=0;
+balls=[];
+powers=[];
+particles=[];
+resetPlayer();
+gameLoop();
+}
+
+function showTop(){
+document.getElementById("menu").style.display="none";
+document.getElementById("topScreen").style.display="flex";
+
+let list=document.getElementById("topList");
+list.innerHTML="";
+
+if(topScores.length===0){
+for(let i=0;i<10;i++){
+list.innerHTML+=`<div>${i+1}. 0</div>`;
+}
+}else{
+for(let i=0;i<10;i++){
+list.innerHTML+=`<div>${i+1}. ${topScores[i]||0}</div>`;
+}
+}
+}
+
+function backMenu(){
+document.getElementById("topScreen").style.display="none";
+document.getElementById("menu").style.display="flex";
+}
+
+/* ===== LOOP ===== */
+function gameLoop(){
+if(state==="playing"){
+update();
+draw();
+requestAnimationFrame(gameLoop);
+}
+}
+
+</script>
+</body>
+</html>
